@@ -1,40 +1,119 @@
-use std::process::{Command, Stdio};
-use std::{env, process, io::Write};
-use ipc_channel::ipc::{channel};
-use ipc_channel::ipc::{self, IpcSender, IpcReceiver};
+// Currently we use pipes, implying memory copies. For less overhead but also less protection we could use 
+// shared memory queues loosing isolation but gaining performance.
+// Queues can be messed up by a maliciouse process (control structures or changing an element after adding)
 
 
-fn spawn<Ti, To>(function: &str, sender:IpcSender<To>, receiver: IpcReceiver<Ti>) -> process::Child {
-    let current_dir = env::current_exe().unwrap();
-    // This assumes the executables of the nodes are in the same crate as the main process
-    // So we get the directory of the main process,
-    // split the name of the main executable and append the name of the current function
-    let function_crate_path = current_dir
-        .parent()
-        .unwrap()
-        .join(function);
-    let mut child = Command::new(function_crate_path)
-        //.arg("frobnicate")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("failed to execute server process");
-    let flat_sender = bincode::serialize(&sender).unwrap();
-    let mut child_stdin = child.stdin.take().unwrap();
-    //child_stdin.write_all(&flat_sender).unwrap();
-    child.stdin.insert(child_stdin);
-    child
+mod api;
+use api::*;
+use clap::Parser;
+
+
+
+
+fn a(arg: u32) -> u32 {
+    arg + 3
 }
 
-// This seems to be a simpler way to spawn rust code https://github.com/servo/ipc-channel/blob/fdeb9231b193b75b2daec173c6e24c2ad799927c/src/test.rs#L118
-// Used for example like this : https://github.com/servo/ipc-channel/blob/fdeb9231b193b75b2daec173c6e24c2ad799927c/src/platform/test.rs#L684
-fn main(){
-    let (tx_result, rx_result) = channel::<String>().unwrap();
-    let (tx_algo1, rx_algo1) = channel::<String>().unwrap();
-    tx_result.send("Frobnicate".to_string());
-    let mut child = spawn("algo1", tx_result, rx_algo1);
-    let output = child.wait().expect("failed to wait on child");
-    println!("output = {:?}", output);
-    let result = rx_result.recv().unwrap();
-    println!("sending worked because I got = {:?}", result);
+fn b(arg: u32) -> u32 {
+    arg * 2
+}
+
+fn c() -> u32 {
+    4
+}
+
+fn algo(){
+     let first = c();
+     let second = b(first);
+     let res = a(second);
+}
+
+
+
+fn wrapper_a(arg_rx: &mut dyn Receiver<u32>, ret_tx: &mut dyn Sender<u32>) {
+    let arg = arg_rx.recv().unwrap();
+    let res = a(arg);
+    ret_tx.send(res).unwrap();
+}
+
+fn wrapper_b(arg_rx: &mut dyn Receiver<u32>, ret_tx: &mut dyn Sender<u32>) {
+    println!("Waiting for c");
+    let arg = arg_rx.recv().unwrap();
+    println!("Received from c {:?}", arg);
+    let res = b(arg);
+    ret_tx.send(res).unwrap();
+}
+
+
+fn wrapper_c(ret_tx: &mut dyn Sender<u32>) {
+    let res = c();
+    println!("Sending from c: {:?}", res);
+    ret_tx.send(res).unwrap();
+    println!("Sent from c");
+}
+
+fn untyped_wrapper_a(rx_fds: &Vec<i32>, tx_fds: &Vec<i32>) {
+    let mut arg_rx = FileReceiver::from_raw_fd(rx_fds[0]);
+    let mut ret_tx = FileSender::from_raw_fd(tx_fds[0]);
+    wrapper_a(&mut arg_rx, &mut ret_tx)
+}
+
+
+fn untyped_wrapper_b(rx_fds: &Vec<i32>, tx_fds: &Vec<i32>) {
+    let mut arg_rx = FileReceiver::from_raw_fd(rx_fds[0]);
+    let mut ret_tx = FileSender::from_raw_fd(tx_fds[0]);
+    wrapper_b(&mut arg_rx, &mut ret_tx)
+}
+
+fn untyped_wrapper_c(tx_fds: &Vec<i32>) {
+    let mut ret_tx = FileSender::from_raw_fd(tx_fds[0]);
+    wrapper_c(&mut ret_tx)
+}
+
+pub fn try_dispatch(args: &Args) {
+    let command = if let Some(command) = &args.command {
+        command
+    } else {
+        return;
+    };
+
+    match command.as_str() {
+        "spawn" => {},
+        _ =>  return
+    }
+
+    if let Some(function) = &args.function {
+        match function.as_str() {
+            "a" => untyped_wrapper_a(&args.receive_channels, &args.send_channels),
+            "b" => untyped_wrapper_b(&args.receive_channels, &args.send_channels),
+            "c" => untyped_wrapper_c(&args.send_channels),
+            _ => unimplemented!()
+        };
+    }
+
+    std::process::exit(0);
+}
+
+
+
+fn main() {
+    let args = Args::parse();
+
+    try_dispatch(&args);
+
+    let b_c = PipeChannel::new();
+    let a_b = PipeChannel::new();
+    let mut main_a = PipeChannel::new();
+    
+    let mut a = launch_process("a", vec![&a_b], vec![&main_a]).unwrap();
+    let mut b = launch_process("b", vec![&b_c], vec![&a_b]).unwrap();
+    let mut c = launch_process("c", vec![], vec![&b_c]).unwrap();
+
+    let result : i32 = main_a.recv().unwrap();
+
+    println!("Result is: {}", result);
+
+    a.wait().unwrap();
+    b.wait().unwrap();
+    c.wait().unwrap();
 }
