@@ -1,0 +1,16 @@
+[package]
+name = "process_arch"
+version = "0.1.0"
+edition = "2021"
+path = "src/main"
+
+[dependencies]
+libc = "0.2.12"
+ipc-channel = "0.16.1"
+bincode = "1.3"
+
+[[bin]]
+name = "algo1"
+
+[[bin]]
+name = "algo2"
