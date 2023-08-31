@@ -84,15 +84,17 @@ impl<T: Copy> Receiver<T> for FileReceiver<T> {
 
 
 
-pub struct PipeChannel {
+pub struct PipeChannel<T: Copy + Sized> {
     rx: PipeReader,
-    tx: PipeWriter
+    tx: PipeWriter,
+    _phantom: PhantomData<T>
 }
 
-impl PipeChannel {
+impl<T: Copy + Sized> PipeChannel<T> {
+
     pub fn new() -> Self {
         let (reader, writer) = os_pipe::pipe().unwrap();
-        Self { rx: reader, tx: writer }
+        Self { rx: reader, tx: writer , _phantom:PhantomData}
     }
 
     fn rx_fd(&self) -> i32 {
@@ -103,7 +105,7 @@ impl PipeChannel {
         self.tx.as_raw_fd()
     }
 
-    pub fn recv<T: Copy + Sized>(&mut self) -> Result<T, IoError> {
+    pub fn recv(&mut self) -> Result<T, IoError> {
         let mut buffer = [0; 1024];
         self.rx.read(&mut buffer)?;
 

@@ -9,7 +9,7 @@ use clap::Parser;
 
 
 
-
+// Library functions out of compile scope:
 fn a(arg: u32) -> u32 {
     arg + 3
 }
@@ -22,6 +22,7 @@ fn c() -> u32 {
     4
 }
 
+// The algorithm we assume to compile
 fn algo(){
      let first = c();
      let second = b(first);
@@ -29,7 +30,7 @@ fn algo(){
 }
 
 
-
+/// SImplified version of the node functions produced by Ohua
 fn wrapper_a(arg_rx: &mut dyn Receiver<u32>, ret_tx: &mut dyn Sender<u32>) {
     let arg = arg_rx.recv().unwrap();
     let res = a(arg);
@@ -52,12 +53,14 @@ fn wrapper_c(ret_tx: &mut dyn Sender<u32>) {
     println!("Sent from c");
 }
 
+
+// We only have those wrappers as part of the "process architecture" right now, because channels are not typed
+// but should be typed to enable the Rust compiler to infer the type of send/received values  
 fn untyped_wrapper_a(rx_fds: &Vec<i32>, tx_fds: &Vec<i32>) {
     let mut arg_rx = FileReceiver::from_raw_fd(rx_fds[0]);
     let mut ret_tx = FileSender::from_raw_fd(tx_fds[0]);
     wrapper_a(&mut arg_rx, &mut ret_tx)
 }
-
 
 fn untyped_wrapper_b(rx_fds: &Vec<i32>, tx_fds: &Vec<i32>) {
     let mut arg_rx = FileReceiver::from_raw_fd(rx_fds[0]);
@@ -70,6 +73,9 @@ fn untyped_wrapper_c(tx_fds: &Vec<i32>) {
     wrapper_c(&mut ret_tx)
 }
 
+// When we fork a new process from the original main-executing one, the control flow will start in main again
+// But obviously in the child processes we want to execute the nodes. So this dispatch function maps on the command line arguments passed to the process
+// and decides what to execute 
 pub fn try_dispatch(args: &Args) {
     let command = if let Some(command) = &args.command {
         command
@@ -94,6 +100,8 @@ pub fn try_dispatch(args: &Args) {
     std::process::exit(0);
 }
 
+/// ToDo: Make Channels typed to avoid the wrappers and make launch_process a macro, such that it can accept
+/// arbitrary numers and types of channels
 
 
 fn main() {
