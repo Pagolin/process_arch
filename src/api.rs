@@ -2,7 +2,7 @@ use std::os::unix::io::FromRawFd;
 use std::marker::PhantomData;
 use std::fs::File;
 use std::io::Error as IoError;
-use std::{process};
+use std::{process, mem};
 use std::process::{Command};
 use os_pipe::{PipeReader, PipeWriter};
 use clap::Parser;
@@ -67,10 +67,13 @@ impl<T> FileReceiver<T> {
     }
 }
 
-impl<T: Copy> Receiver<T> for FileReceiver<T> {
+//TODO: Receiving works just once because we should only receive the size of
+// the data type we expect -> try enforcing Sized and making size of T the size of receiving buffer
+impl<T: Copy+Sized> Receiver<T> for FileReceiver<T> {
     fn recv(&mut self) -> Result<T, IoError> {
         //FIXME: We need a read of appropriate length i.e. size of T
-        let mut buffer = [0; 1024];
+        let size = mem::size_of::<T>();
+        let mut buffer = vec![0; size];
         self.file.read(&mut buffer)?;
 
         let ret = unsafe {
@@ -99,7 +102,7 @@ impl PipeChannel {
         self.rx.as_raw_fd()
     }
 
-    fn tx_fd(&self) -> i32 {
+    pub fn tx_fd(&self) -> i32 {
         self.tx.as_raw_fd()
     }
 
@@ -113,12 +116,8 @@ impl PipeChannel {
 
         Ok(ret)
     }
+    pub fn close(self){}
 }
-
-// Pipe first -> (rx, tx)
-// rx -> a
-// tx -> b
-// b -> a
 
 pub fn launch_process(name: &str, rx_channels: Vec<&PipeChannel>, tx_channels: Vec<&PipeChannel>)
      -> Result<process::Child, IoError>
