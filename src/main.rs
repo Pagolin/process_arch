@@ -1,74 +1,138 @@
 // Currently we use pipes, implying memory copies. For less overhead but also less protection we could use 
 // shared memory queues loosing isolation but gaining performance.
 // Queues can be messed up by a maliciouse process (control structures or changing an element after adding)
-
-
 mod api;
+
 use api::*;
+use std::io::Error as IOError;
 use clap::Parser;
 
+mod funs;
+use funs::*;
 
 
-
-fn a(arg: u32) -> u32 {
-    arg + 3
+fn input_fun(y:i32) -> i32 {
+    let mut s: State = State::new_state(y);
+    let stream: Vec<i32> = iter_i32();
+    for e in stream {
+        let e1: i32 = e;
+        s.gs(e1);
+    }
+    s.gs(5)
 }
 
-fn b(arg: u32) -> u32 {
-    arg * 2
+fn task_0(s_0_1_1_rx: &mut dyn Receiver<State>, b_0_0_tx: &mut dyn Sender<i32>) -> Result<(), IOError>  {
+    loop {
+        let mut var_0 = s_0_1_1_rx.recv()?;
+        println!("Task0 received State");
+        let b_0_0 = var_0.gs(5);
+        b_0_0_tx.send(b_0_0)?;
+        println!("Task0 sent the result");
+        ()
+      }
+    Ok(())
 }
 
-fn c() -> u32 {
-    4
+fn task_1(ctrl_0_0_tx: &mut dyn Sender<(bool, usize)>, d_1_tx: &mut dyn Sender<i32> ) -> Result<(), IOError> {
+    let mut stream_0_0_0 = iter_i32();
+      let hasSize =
+        {
+          let tmp_has_size = stream_0_0_0.iter().size_hint();
+          tmp_has_size.1.is_some()
+        };
+    println!("Task1 about to return Ok");
+      Ok(if hasSize {
+        let size = stream_0_0_0.len();
+        let ctrl = (true, size);
+        ctrl_0_0_tx.send(ctrl)?;
+        for d in stream_0_0_0 { d_1_tx.send(d)?; println!("Task1 sent {d}"); () }
+      } else {
+        let mut size = 0;
+        for d in stream_0_0_0 {
+          d_1_tx.send(d)?;
+          //println!("Task1 sent {d}");
+          let ctrl = (false, 1);
+          ctrl_0_0_tx.send(ctrl)?;
+          size = size + 1;
+          ()
+        };
+        let ctrl = (true, 0);
+        ctrl_0_0_tx.send(ctrl)?;
+        ()
+      })
 }
 
-fn algo(){
-     let first = c();
-     let second = b(first);
-     let res = a(second);
+// I add I manually here, because it's an env parameter and ignored in Shared Memory code generation
+fn task_2(env_i: &mut dyn Receiver<i32>, s_0_0_1_tx: &mut dyn Sender<State>)-> Result<(), IOError> {
+    let i = env_i.recv()?;
+    let s_0_0_1 = State::new_state(i);
+    s_0_0_1_tx.send(s_0_0_1)?;
+    println!("Task2 sent state ");
+    Ok(())
+}
+
+fn task_3(s_0_0_1_rx: &mut dyn Receiver<State>,
+          ctrl_0_0_rx: &mut dyn Receiver<(bool, usize)>,
+          d_1_rx: &mut dyn Receiver<i32>,
+          s_0_1_1_tx: &mut dyn Sender<State>)
+-> Result<(), IOError>
+{
+    loop {
+        let mut renew = false;
+        println!("Task3 tries to receive state");
+        let mut s_0_0_1_0 = s_0_0_1_rx.recv()?;
+        println!("Task3 received state  {:?}", s_0_0_1_0);
+        while !renew {
+          let sig = ctrl_0_0_rx.recv()?;
+          let count = sig.1;
+          println!("We need data {count} times ");
+          for _ in 0 .. count {
+            println!("Task3 needs data");
+            let var_1 = d_1_rx.recv()?;
+            println!("Task3 received data {var_1}");
+            s_0_0_1_0.gs(var_1);
+            //println!("and did the calculation");
+            ()
+          };
+          println!("Task3 left the for loop");
+          let renew_next_time = sig.0;
+          renew = renew_next_time;
+          ()
+        };
+        s_0_1_1_tx.send(s_0_0_1_0)?;
+        println!("Task3 sent state");
+        ()
+      }
+    Ok(())
+}
+
+fn untyped_wrapper_0(rx_fds: &Vec<i32>, tx_fds: &Vec<i32>)-> Result<(), IOError> {
+    let mut rx_0  = FileReceiver::from_raw_fd(rx_fds[0]);
+    let mut tx_0 = FileSender::from_raw_fd(tx_fds[0]);
+    task_0(&mut rx_0, &mut tx_0)
+}
+
+fn untyped_wrapper_1(rx_fds: &Vec<i32>, tx_fds: &Vec<i32>) -> Result<(), IOError> {
+    let mut tx_0  = FileSender::from_raw_fd(tx_fds[0]);
+    let mut tx_1 = FileSender::from_raw_fd(tx_fds[1]);
+    task_1(&mut tx_0, &mut tx_1)
+}
+
+fn untyped_wrapper_2(rx_fds: &Vec<i32>, tx_fds: &Vec<i32>) -> Result<(), IOError> {
+    let mut rx_0 = FileReceiver::from_raw_fd(rx_fds[0]);
+    let mut tx_0  = FileSender::from_raw_fd(tx_fds[0]);
+    task_2(&mut rx_0, &mut tx_0)
+}
+
+fn untyped_wrapper_3(rx_fds: &Vec<i32>, tx_fds: &Vec<i32>)-> Result<(), IOError> {
+    let mut rx_0  = FileReceiver::from_raw_fd(rx_fds[0]);
+    let mut rx_1 = FileReceiver::from_raw_fd(rx_fds[1]);
+    let mut rx_2 = FileReceiver::from_raw_fd(rx_fds[2]);
+    let mut tx_0  = FileSender::from_raw_fd(tx_fds[0]);
+    task_3(&mut rx_0, &mut rx_1, &mut rx_2, &mut tx_0)
 }
 
 
-
-fn wrapper_a(arg_rx: &mut dyn Receiver<u32>, ret_tx: &mut dyn Sender<u32>) {
-    let arg = arg_rx.recv().unwrap();
-    let res = a(arg);
-    ret_tx.send(res).unwrap();
-}
-
-fn wrapper_b(arg_rx: &mut dyn Receiver<u32>, ret_tx: &mut dyn Sender<u32>) {
-    println!("Waiting for c");
-    let arg = arg_rx.recv().unwrap();
-    println!("Received from c {:?}", arg);
-    let res = b(arg);
-    ret_tx.send(res).unwrap();
-}
-
-
-fn wrapper_c(ret_tx: &mut dyn Sender<u32>) {
-    let res = c();
-    println!("Sending from c: {:?}", res);
-    ret_tx.send(res).unwrap();
-    println!("Sent from c");
-}
-
-fn untyped_wrapper_a(rx_fds: &Vec<i32>, tx_fds: &Vec<i32>) {
-    let mut arg_rx = FileReceiver::from_raw_fd(rx_fds[0]);
-    let mut ret_tx = FileSender::from_raw_fd(tx_fds[0]);
-    wrapper_a(&mut arg_rx, &mut ret_tx)
-}
-
-
-fn untyped_wrapper_b(rx_fds: &Vec<i32>, tx_fds: &Vec<i32>) {
-    let mut arg_rx = FileReceiver::from_raw_fd(rx_fds[0]);
-    let mut ret_tx = FileSender::from_raw_fd(tx_fds[0]);
-    wrapper_b(&mut arg_rx, &mut ret_tx)
-}
-
-fn untyped_wrapper_c(tx_fds: &Vec<i32>) {
-    let mut ret_tx = FileSender::from_raw_fd(tx_fds[0]);
-    wrapper_c(&mut ret_tx)
-}
 
 pub fn try_dispatch(args: &Args) {
     let command = if let Some(command) = &args.command {
@@ -78,22 +142,22 @@ pub fn try_dispatch(args: &Args) {
     };
 
     match command.as_str() {
-        "spawn" => {},
-        _ =>  return
+        "spawn" => {}
+        _ => return
     }
-
+    
     if let Some(function) = &args.function {
         match function.as_str() {
-            "a" => untyped_wrapper_a(&args.receive_channels, &args.send_channels),
-            "b" => untyped_wrapper_b(&args.receive_channels, &args.send_channels),
-            "c" => untyped_wrapper_c(&args.send_channels),
+            "task_0" => untyped_wrapper_0(&args.receive_channels, &args.send_channels),
+            "task_1" => untyped_wrapper_1(&args.receive_channels, &args.send_channels),
+            "task_2" => untyped_wrapper_2(&args.receive_channels, &args.send_channels),
+            "task_3" => untyped_wrapper_3(&args.receive_channels, &args.send_channels),
             _ => unimplemented!()
-        };
+        }.expect("We got an error from one of the nodes");
     }
 
     std::process::exit(0);
 }
-
 
 
 fn main() {
@@ -101,19 +165,30 @@ fn main() {
 
     try_dispatch(&args);
 
-    let b_c = PipeChannel::new();
-    let a_b = PipeChannel::new();
-    let mut main_a = PipeChannel::new();
-    
-    let mut a = launch_process("a", vec![&a_b], vec![&main_a]).unwrap();
-    let mut b = launch_process("b", vec![&b_c], vec![&a_b]).unwrap();
-    let mut c = launch_process("c", vec![], vec![&b_c]).unwrap();
+    let mut env_i = PipeChannel::new();
+    let mut b_0_0 = PipeChannel::new();
+    let s_0_0_1 = PipeChannel::new();
+    let ctrl_0_0 = PipeChannel::new();
+    let d_1 = PipeChannel::new();
+    let s_0_1_1 = PipeChannel::new();
 
-    let result : i32 = main_a.recv().unwrap();
-
+    // we need to send the arguments of the original algorithm from main
+    FileSender::from_raw_fd(env_i.tx_fd()).send(42).expect("Sending algo argument failed");
+    println!("About to launch");
+    let mut task_0 = launch_process("task_0", vec![&s_0_1_1], vec![&b_0_0]).unwrap();
+    let mut task_1 = launch_process("task_1", vec![], vec![&ctrl_0_0, &d_1]).unwrap();
+    let mut task_2 = launch_process("task_2", vec![&env_i], vec![&s_0_0_1]).unwrap();
+    let mut task_3 = launch_process("task_3", vec![&s_0_0_1, &ctrl_0_0, &d_1], vec![&s_0_1_1]).unwrap();
+    println!("Launched");
+    let result: i32 = b_0_0.recv().unwrap();
     println!("Result is: {}", result);
 
-    a.wait().unwrap();
-    b.wait().unwrap();
-    c.wait().unwrap();
+    s_0_0_1.close();
+    s_0_1_1.close();
+    ctrl_0_0.close();
+    task_0.wait().unwrap();
+    task_1.wait().unwrap();
+    task_2.wait().unwrap();
+    task_3.wait().unwrap();
+
 }
